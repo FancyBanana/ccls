@@ -1,6 +1,6 @@
 version: "{build}"
 
-os: Visual Studio 2017
+os: Visual Studio 2019
 
 platform:
   - x64
@@ -10,12 +10,12 @@ build:
   verbosity: minimal
 
 install:
-  - if not exist llvm.tar.xz appveyor DownloadFile "https://ziglang.org/deps/llvm+clang-7.0.0-win64-msvc-release.tar.xz" -FileName llvm.tar.xz
+  - if not exist llvm.tar.xz appveyor DownloadFile "https://ziglang.org/deps/llvm%2bclang%2blld-11.0.0-x86_64-windows-msvc-release-mt.tar.xz" -FileName llvm.tar.xz
   - 7z e -txz llvm.tar.xz
   - 7z x llvm.tar
   - git submodule update --init --recursive
 build_script:
-  - cmake -G"Visual Studio 15 2017 Win64" -H. -Bbuild -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH=C:\projects\ccls\llvm+clang-7.0.0-win64-msvc-release
+  - cmake -G"Visual Studio 16 2019" -AWin64 -H. -Bbuild -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH=C:\projects\ccls\llvm+clang-7.0.0-win64-msvc-release
   - cmake --build build --target ccls --config Release
 
 artifacts:
