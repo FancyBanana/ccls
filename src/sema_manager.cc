@@ -178,11 +178,19 @@ public:
       : sm(sm), out(out) {}
   void InclusionDirective(SourceLocation hashLoc, const Token &includeTok,
                           StringRef fileName, bool isAngled,
-                          CharSourceRange filenameRange, const FileEntry *file,
+                          CharSourceRange filenameRange,
+#if LLVM_VERSION_MAJOR >= 15 // llvmorg-15-init-7692-gd79ad2f1dbc2
+                          llvm::Optional<FileEntryRef> fileRef,
+#else
+                          const FileEntry *file,
+#endif
                           StringRef searchPath, StringRef relativePath,
                           const clang::Module *imported,
                           SrcMgr::CharacteristicKind fileKind) override {
     (void)sm;
+#if LLVM_VERSION_MAJOR >= 15 // llvmorg-15-init-7692-gd79ad2f1dbc2
+    const FileEntry *file = fileRef ? &fileRef->getFileEntry() : nullptr;
+#endif
     if (file && seen.insert(file).second)
       out.emplace_back(pathFromFileEntry(*file), file->getModificationTime());
   }
@@ -327,19 +335,26 @@ buildCompilerInstance(Session &session, std::unique_ptr<CompilerInvocation> ci,
 
 bool parse(CompilerInstance &clang) {
   SyntaxOnlyAction action;
-  if (!action.BeginSourceFile(clang, clang.getFrontendOpts().Inputs[0]))
-    return false;
+  llvm::CrashRecoveryContext crc;
+  bool ok = false;
+  auto run = [&]() {
+    if (!action.BeginSourceFile(clang, clang.getFrontendOpts().Inputs[0]))
+      return;
 #if LLVM_VERSION_MAJOR >= 9 // rL364464
-  if (llvm::Error e = action.Execute()) {
-    llvm::consumeError(std::move(e));
-    return false;
-  }
+    if (llvm::Error e = action.Execute()) {
+      llvm::consumeError(std::move(e));
+      return;
+    }
 #else
-  if (!action.Execute())
-    return false;
+    if (!action.Execute())
+      return;
 #endif
-  action.EndSourceFile();
-  return true;
+    action.EndSourceFile();
+    ok = true;
+  };
+  if (!crc.RunSafely(run))
+    LOG_S(ERROR) << "clang crashed";
+  return ok;
 }
 
 void buildPreamble(Session &session, CompilerInvocation &ci,
@@ -414,7 +429,8 @@ void *preambleMain(void *manager_) {
   auto *manager = static_cast<SemaManager *>(manager_);
   set_thread_name("preamble");
   while (true) {
-    SemaManager::PreambleTask task = manager->preamble_tasks.dequeue();
+    SemaManager::PreambleTask task = manager->preamble_tasks.dequeue(
+        g_config ? g_config->session.maxNum : 0);
     if (pipeline::g_quit.load(std::memory_order_relaxed))
       break;
 

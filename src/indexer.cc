@@ -527,29 +527,32 @@ public:
     auto i = name.find(short_name);
     if (short_name.size())
       while (i != std::string::npos &&
-             ((i && isIdentifierBody(name[i - 1])) ||
-              isIdentifierBody(name[i + short_name.size()])))
+             ((i && isAsciiIdentifierContinue(name[i - 1])) ||
+              isAsciiIdentifierContinue(name[i + short_name.size()])))
         i = name.find(short_name, i + short_name.size());
     if (i == std::string::npos) {
       // e.g. operator type-parameter-1
       i = 0;
       def.short_name_offset = 0;
-    } else if (short_name.empty() || (i >= 2 && name[i - 2] == ':')) {
-      // Don't replace name with qualified name in ns::name Cls::*name
-      def.short_name_offset = i;
+      def.short_name_size = name.size();
     } else {
-      name.replace(i, short_name.size(), qualified);
-      def.short_name_offset = i + qualified.size() - short_name.size();
+      if (short_name.empty() || (i >= 2 && name[i - 2] == ':')) {
+        // Don't replace name with qualified name in ns::name Cls::*name
+        def.short_name_offset = i;
+      } else {
+        name.replace(i, short_name.size(), qualified);
+        def.short_name_offset = i + qualified.size() - short_name.size();
+      }
+      // name may be empty while short_name is not.
+      def.short_name_size = name.empty() ? 0 : short_name.size();
     }
-    // name may be empty while short_name is not.
-    def.short_name_size = name.empty() ? 0 : short_name.size();
     for (int paren = 0; i; i--) {
       // Skip parentheses in "(anon struct)::name"
       if (name[i - 1] == ')')
         paren++;
       else if (name[i - 1] == '(')
         paren--;
-      else if (!(paren > 0 || isIdentifierBody(name[i - 1]) ||
+      else if (!(paren > 0 || isAsciiIdentifierContinue(name[i - 1]) ||
                  name[i - 1] == ':'))
         break;
     }
@@ -1093,10 +1096,18 @@ public:
   }
   void InclusionDirective(SourceLocation hashLoc, const Token &tok,
                           StringRef included, bool isAngled,
-                          CharSourceRange filenameRange, const FileEntry *file,
+                          CharSourceRange filenameRange,
+#if LLVM_VERSION_MAJOR >= 15 // llvmorg-15-init-7692-gd79ad2f1dbc2
+                          llvm::Optional<FileEntryRef> fileRef,
+#else
+                          const FileEntry *file,
+#endif
                           StringRef searchPath, StringRef relativePath,
                           const Module *imported,
                           SrcMgr::CharacteristicKind fileType) override {
+#if LLVM_VERSION_MAJOR >= 15 // llvmorg-15-init-7692-gd79ad2f1dbc2
+    const FileEntry *file = fileRef ? &fileRef->getFileEntry() : nullptr;
+#endif
     if (!file)
       return;
     auto spell = fromCharSourceRange(sm, param.ctx->getLangOpts(),
